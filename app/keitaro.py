@@ -59,6 +59,10 @@ def create_stream(data: dict):
     return _request("POST", "streams", data)
 
 
+def get_campaign(campaign_id: int):
+    return _request("GET", f"campaigns/{campaign_id}")
+
+
 def campaign_streams(campaign_id: int):
     return _request("GET", f"campaigns/{campaign_id}/streams")
 

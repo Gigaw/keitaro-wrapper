@@ -75,6 +75,17 @@ def list_campaigns(db: Session = Depends(get_db)):
             for c in db.scalars(select(Campaign).order_by(Campaign.id.desc()))]
 
 
+class ImportIn(BaseModel):
+    keitaro_id: int
+
+
+@app.post("/api/campaigns/import")
+def import_campaign(data: ImportIn, db: Session = Depends(get_db)):
+    campaign = service.import_campaign(db, data.keitaro_id)
+    db.commit()
+    return campaign_out(campaign)
+
+
 @app.get("/api/campaigns/{campaign_id}")
 def get_campaign(campaign_id: int, db: Session = Depends(get_db)):
     return campaign_out(get_or_404(db, Campaign, campaign_id))

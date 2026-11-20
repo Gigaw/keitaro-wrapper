@@ -3,6 +3,7 @@ import secrets
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import keitaro
@@ -35,6 +36,22 @@ def create_campaign(db: Session, name: str, country: str, offer_id: int,
     db.add(campaign)
     db.commit()  # кампания уже есть в Keitaro: сохраняем её, даже если Fetch ниже упадёт
     fetch_streams(campaign)
+    return campaign
+
+
+def import_campaign(db: Session, keitaro_id: int) -> Campaign:
+    """Открывает в редакторе кампанию, которая уже есть в Keitaro (только чтение из Keitaro)."""
+    campaign = db.scalar(select(Campaign).where(Campaign.keitaro_id == keitaro_id))
+    if campaign is None:
+        try:
+            kc = keitaro.get_campaign(keitaro_id)
+        except keitaro.KeitaroError as e:
+            if e.status in (403, 404):
+                raise HTTPException(404, f"Кампания {keitaro_id} не найдена в Keitaro или нет доступа")
+            raise
+        campaign = Campaign(keitaro_id=kc["id"], name=kc["name"])
+        db.add(campaign)
+        fetch_streams(campaign)
     return campaign
 
 

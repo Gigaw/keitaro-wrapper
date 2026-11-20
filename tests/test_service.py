@@ -23,6 +23,7 @@ class FakeKeitaro:
         monkeypatch.setattr(keitaro, "list_offers", lambda: [{"id": k, "name": v} for k, v in OFFER_NAMES.items()])
         monkeypatch.setattr(keitaro, "get_offer", self.get_offer)
         monkeypatch.setattr(keitaro, "campaign_streams", lambda cid: list(self.streams.values()))
+        monkeypatch.setattr(keitaro, "get_campaign", lambda cid: {"id": cid, "name": "existing"})
         monkeypatch.setattr(keitaro, "get_stream", lambda sid: self.streams[sid])
         monkeypatch.setattr(keitaro, "update_stream_offers", self.update_stream_offers)
 
@@ -228,3 +229,14 @@ def test_cancel_and_delete_return_brought_back_offer_to_archive(campaign):
     service.delete_offer(by_id(s, 1))
     assert state(s)[1] == (REMOVED, 0)
     assert not s.dirty
+
+
+def test_import_existing_campaign_is_idempotent(fake):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        imported = service.import_campaign(db, 77)
+        db.commit()
+        assert imported.name == "existing"
+        assert state(offers_stream(imported)) == {1: (ACTIVE, 34), 2: (ACTIVE, 33), 3: (ACTIVE, 33)}
+        assert service.import_campaign(db, 77) is imported

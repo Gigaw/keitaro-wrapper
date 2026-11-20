@@ -39,6 +39,20 @@ export default function Creator() {
     }
   }
 
+  const [importId, setImportId] = useState('')
+  const [importError, setImportError] = useState('')
+
+  async function importCampaign(e: React.FormEvent) {
+    e.preventDefault()
+    setImportError('')
+    try {
+      const campaign = await api<Campaign>('/campaigns/import', 'POST', { keitaro_id: Number(importId) })
+      location.hash = `#/campaigns/${campaign.id}`
+    } catch (e) {
+      setImportError((e as Error).message)
+    }
+  }
+
   const select = (field: 'domain_id' | 'group_id' | 'traffic_source_id', items: Option[] = []) => (
     <select required value={form[field]} onChange={set(field)}>
       <option value="">— выберите —</option>
@@ -67,7 +81,15 @@ export default function Creator() {
       </section>
 
       <section className="card">
-        <h2>Кампании</h2>
+        <h2>Открыть кампанию из Keitaro</h2>
+        <form onSubmit={importCampaign} className="toolbar">
+          <input required type="number" placeholder="ID кампании в Keitaro" value={importId}
+            onChange={(e) => setImportId(e.target.value)} />
+          <button className="primary">Открыть</button>
+        </form>
+        {importError && <p className="error">{importError}</p>}
+
+        <h2 style={{ marginTop: 24 }}>Кампании</h2>
         {campaigns.length === 0 && <p className="muted">Пока нет — создайте первую.</p>}
         <ul className="campaigns">
           {campaigns.map((c) => (
