@@ -41,15 +41,19 @@ export default function Creator() {
 
   const [importId, setImportId] = useState('')
   const [importError, setImportError] = useState('')
+  const [importing, setImporting] = useState(false)
 
   async function importCampaign(e: React.FormEvent) {
     e.preventDefault()
     setImportError('')
+    setImporting(true) // без блокировки двойной клик даёт два импорта одной кампании
     try {
       const campaign = await api<Campaign>('/campaigns/import', 'POST', { keitaro_id: Number(importId) })
       location.hash = `#/campaigns/${campaign.id}`
     } catch (e) {
       setImportError((e as Error).message)
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -85,7 +89,7 @@ export default function Creator() {
         <form onSubmit={importCampaign} className="toolbar">
           <input required type="number" placeholder="ID кампании в Keitaro" value={importId}
             onChange={(e) => setImportId(e.target.value)} />
-          <button className="primary">Открыть</button>
+          <button className="primary" disabled={importing}>{importing ? 'Открываю…' : 'Открыть'}</button>
         </form>
         {importError && <p className="error">{importError}</p>}
 
