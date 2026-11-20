@@ -169,3 +169,49 @@ def test_fetch_skips_dirty_stream(campaign, fake):
     assert len(warnings) == 1
     assert state(s)[4] == (PENDING_ADD, 25)
     assert state(s)[1] == (ACTIVE, 25)
+
+
+def test_cancel_reverts_pin(campaign):
+    s = offers_stream(campaign)
+    service.set_pin(by_id(s, 3), True, 25)
+    service.cancel(s)
+    assert state(s) == {1: (ACTIVE, 34), 2: (ACTIVE, 33), 3: (ACTIVE, 33)}
+    assert not by_id(s, 3).pinned
+    service.add_offer(s, 4)
+    assert [state(s)[i][1] for i in (1, 2, 3, 4)] == [25, 25, 25, 25]
+
+
+def test_pin_survives_push_and_delete_cancel(campaign):
+    s = offers_stream(campaign)
+    service.set_pin(by_id(s, 3), True, 25)
+    service.push(s)
+    service.delete_offer(by_id(s, 3))
+    assert state(s) == {1: (ACTIVE, 50), 2: (ACTIVE, 50), 3: (PENDING_REMOVE, 0)}
+    service.bring_back(by_id(s, 3))
+    assert state(s) == {1: (ACTIVE, 38), 2: (ACTIVE, 37), 3: (ACTIVE, 25)}
+    assert by_id(s, 3).pinned
+    service.delete_offer(by_id(s, 3))
+    service.cancel(s)
+    assert state(s) == {1: (ACTIVE, 38), 2: (ACTIVE, 37), 3: (ACTIVE, 25)}
+    assert by_id(s, 3).pinned and not s.dirty
+
+
+def test_push_recalculates_broken_weights(campaign, fake):
+    s = offers_stream(campaign)
+    service.add_offer(s, 4)
+    by_id(s, 4).share = 50  # как после гонки двух параллельных запросов
+    service.push(s)
+    assert sum(o["share"] for o in fake.pushed[-1]) == 100
+
+
+def test_cancel_and_delete_return_brought_back_offer_to_archive(campaign):
+    s = offers_stream(campaign)
+    service.delete_offer(by_id(s, 1))
+    service.push(s)
+    service.bring_back(by_id(s, 1))
+    service.cancel(s)
+    assert state(s)[1] == (REMOVED, 0)
+    service.bring_back(by_id(s, 1))
+    service.delete_offer(by_id(s, 1))
+    assert state(s)[1] == (REMOVED, 0)
+    assert not s.dirty

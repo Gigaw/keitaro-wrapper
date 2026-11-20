@@ -20,7 +20,10 @@ def _request(method: str, path: str, json: dict | None = None):
         # На 404 nginx отдаёт HTML, а не JSON
         detail = r.json() if "json" in r.headers.get("content-type", "") else r.reason_phrase
         raise KeitaroError(f"Keitaro ответил {r.status_code}: {detail}", r.status_code)
-    return r.json()
+    try:
+        return r.json()
+    except ValueError:
+        raise KeitaroError(f"Keitaro вернул не JSON (статус {r.status_code})")
 
 
 def list_domains():

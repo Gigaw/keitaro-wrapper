@@ -33,6 +33,7 @@ def create_campaign(db: Session, name: str, country: str, offer_id: int,
     })
     campaign = Campaign(keitaro_id=kc["id"], name=kc["name"])
     db.add(campaign)
+    db.commit()  # кампания уже есть в Keitaro: сохраняем её, даже если Fetch ниже упадёт
     fetch_streams(campaign)
     return campaign
 
@@ -63,10 +64,10 @@ def _sync_offers(stream: Stream, keitaro_offers: list[dict], names: dict[int, st
     for ko in keitaro_offers:
         offer = ours.pop(ko["offer_id"], None)
         if offer is None:
-            offer = StreamOffer(offer_keitaro_id=ko["offer_id"], pinned=False)
+            offer = StreamOffer(offer_keitaro_id=ko["offer_id"], pinned=False, published_pinned=False)
             stream.offers.append(offer)
         offer.offer_name = names.get(ko["offer_id"]) or offer.offer_name or f"Offer {ko['offer_id']}"
-        offer.status = ACTIVE
+        offer.status, offer.from_archive = ACTIVE, False
         offer.share = offer.published_share = ko["share"]
     for offer in ours.values():
         if offer.status != REMOVED:
@@ -74,7 +75,8 @@ def _sync_offers(stream: Stream, keitaro_offers: list[dict], names: dict[int, st
 
 
 def _archive(offer: StreamOffer) -> None:
-    offer.status, offer.share, offer.published_share, offer.pinned = REMOVED, 0, None, False
+    offer.status, offer.share, offer.published_share = REMOVED, 0, None
+    offer.pinned = offer.published_pinned = offer.from_archive = False
 
 
 def _recalc(stream: Stream) -> None:
@@ -94,7 +96,8 @@ def add_offer(stream: Stream, offer_id: int) -> None:
     if existing is None:
         offer = keitaro.get_offer(offer_id)
         stream.offers.append(StreamOffer(offer_keitaro_id=offer_id, offer_name=offer["name"], share=0,
-                                         published_share=None, pinned=False, status=PENDING_ADD))
+                                         published_share=None, pinned=False, published_pinned=False,
+                                         status=PENDING_ADD))
     elif existing.status in (REMOVED, PENDING_REMOVE):
         return bring_back(existing)
     else:
@@ -105,7 +108,7 @@ def add_offer(stream: Stream, offer_id: int) -> None:
 def delete_offer(offer: StreamOffer) -> None:
     stream = offer.stream
     if offer.status == PENDING_ADD:
-        stream.offers.remove(offer)  # в Keitaro его не было, архивировать нечего
+        _drop_pending_add(offer)
     elif offer.status == ACTIVE:
         offer.status, offer.share, offer.pinned = PENDING_REMOVE, 0, False
     else:
@@ -115,9 +118,9 @@ def delete_offer(offer: StreamOffer) -> None:
 
 def bring_back(offer: StreamOffer) -> None:
     if offer.status == REMOVED:
-        offer.status = PENDING_ADD
+        offer.status, offer.from_archive = PENDING_ADD, True
     elif offer.status == PENDING_REMOVE:
-        offer.status = ACTIVE
+        _revert(offer)
     else:
         raise HTTPException(400, "Оффер не удалён")
     _recalc(offer.stream)
@@ -137,12 +140,22 @@ def set_pin(offer: StreamOffer, pinned: bool, share: int | None) -> None:
 def cancel(stream: Stream) -> None:
     for offer in list(stream.offers):
         if offer.status == PENDING_ADD:
-            stream.offers.remove(offer)
+            _drop_pending_add(offer)
             continue
-        if offer.status == PENDING_REMOVE:
-            offer.status = ACTIVE
-        if offer.status == ACTIVE:
-            offer.share = offer.published_share
+        if offer.status in (ACTIVE, PENDING_REMOVE):
+            _revert(offer)
+
+
+def _drop_pending_add(offer: StreamOffer) -> None:
+    if offer.from_archive:
+        _archive(offer)
+    else:
+        offer.stream.offers.remove(offer)  # новый оффер: в Keitaro его не было, хранить нечего
+
+
+def _revert(offer: StreamOffer) -> None:
+    """Возвращает опубликованный оффер к состоянию последнего Push/Fetch."""
+    offer.status, offer.share, offer.pinned = ACTIVE, offer.published_share, offer.published_pinned
 
 
 def push(stream: Stream) -> None:
@@ -152,9 +165,8 @@ def push(stream: Stream) -> None:
     if theirs != published:
         raise HTTPException(409, "Поток изменили в Keitaro после последнего Fetch. "
                                  "Нажмите Cancel, затем Fetch Streams и повторите изменения.")
+    _recalc(stream)  # страховка: веса могли разъехаться при параллельных запросах
     live = [o for o in stream.offers if o.status in LIVE]
-    if live and sum(o.share for o in live) != 100:
-        raise HTTPException(400, "Сумма весов не равна 100%")
     # Сохраняем state офферов в Keitaro (например, disabled), чтобы Push его не сбросил
     states = {o["offer_id"]: o["state"] for o in current["offers"]}
     updated = keitaro.update_stream_offers(stream.keitaro_id, [
@@ -163,3 +175,5 @@ def push(stream: Stream) -> None:
     ])
     stream.raw, stream.last_synced_at = updated, datetime.now(UTC)
     _sync_offers(stream, updated["offers"], {})
+    for offer in stream.offers:
+        offer.published_pinned = offer.pinned

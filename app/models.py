@@ -62,6 +62,9 @@ class StreamOffer(Base):
     share: Mapped[int]  # вес в черновике
     published_share: Mapped[int | None]  # вес в Keitaro; None, если оффера там нет
     pinned: Mapped[bool] = mapped_column(default=False)
+    published_pinned: Mapped[bool] = mapped_column(default=False, server_default="0")  # pin на момент Push; к нему откатывает Cancel
     status: Mapped[str] = mapped_column(String(20))
+    # pending_add, вернувшийся из архива: Cancel/Delete возвращают его в архив, а не удаляют запись
+    from_archive: Mapped[bool] = mapped_column(default=False, server_default="0")
 
     stream: Mapped[Stream] = relationship(back_populates="offers")

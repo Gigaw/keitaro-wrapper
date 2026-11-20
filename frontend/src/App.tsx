@@ -12,5 +12,15 @@ export default function App() {
   }, [])
 
   const match = hash.match(/^#\/campaigns\/(\d+)$/)
-  return <main>{match ? <Editor id={Number(match[1])} /> : <Creator />}</main>
+  return (
+    <>
+      <header className="topbar">
+        <div>
+          <a href="#/">Keitaro wrapper</a>
+          <span>создаватор и редактор кампаний</span>
+        </div>
+      </header>
+      <main>{match ? <Editor id={Number(match[1])} /> : <Creator />}</main>
+    </>
+  )
 }

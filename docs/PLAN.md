@@ -35,7 +35,7 @@
 | Add | новый → pending_add; если оффер есть в архиве этого потока, это Bring Back |
 | Delete | active → pending_remove (share 0); pending_add → запись удаляется |
 | Bring Back | removed → pending_add |
-| Cancel | pending_add удаляются; pending_remove → active; у всех share = published_share (pin — локальная настройка, в Keitaro её нет, Cancel её не трогает) |
+| Cancel | pending_add удаляются; pending_remove → active; у всех share = published_share и pinned = published_pinned (pin в Keitaro не хранится; его состояние на момент Push хранится у нас) |
 | Push | проверка конфликта: читаем поток из Keitaro, сравниваем пары (offer_id, share) с нашими active/pending_remove + published_share; расхождение → ошибка «сделайте Fetch». Иначе `PUT offers=[active + pending_add]`, затем pending_add → active, pending_remove → removed, published_share = share |
 | Pin / Unpin, изменение веса закреплённого | пересчёт весов |
 

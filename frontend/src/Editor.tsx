@@ -5,6 +5,7 @@ export default function Editor({ id }: { id: number }) {
   const [campaign, setCampaign] = useState<Campaign | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     api<Campaign>(`/campaigns/${id}`).then(setCampaign).catch((e) => setError(e.message))
@@ -12,31 +13,44 @@ export default function Editor({ id }: { id: number }) {
 
   async function fetchStreams() {
     setError('')
+    setBusy(true)
     try {
       const r = await api<{ campaign: Campaign; warnings: string[] }>(`/campaigns/${id}/fetch`, 'POST')
       setCampaign(r.campaign)
       setWarnings(r.warnings)
     } catch (e) {
       setError((e as Error).message)
+    } finally {
+      setBusy(false)
     }
   }
 
   // Бэкенд возвращает изменённый поток целиком — подменяем его в списке
-  const replaceStream = (s: Stream) =>
+  const replaceStream = (s: Stream) => {
     setCampaign((c) => c && { ...c, streams: c.streams.map((x) => (x.id === s.id ? s : x)) })
+    setWarnings([]) // предупреждения Fetch относились к прошлому состоянию потоков
+  }
 
-  if (!campaign) return error ? <p className="error">{error}</p> : <p>Загрузка…</p>
+  if (!campaign) return error ? <p className="error">{error}</p> : <p className="muted">Загрузка…</p>
 
   return (
     <>
-      <a href="#/">← К списку</a>
-      <h1>{campaign.name}</h1>
-      <p className="muted">
-        Keitaro ID {campaign.keitaro_id} · синхронизировано {formatDate(campaign.last_synced_at)}
-      </p>
-      <button onClick={fetchStreams}>Fetch Streams</button>
-      {error && <p className="error">{error}</p>}
-      {warnings.map((w) => <p key={w} className="warning">{w}</p>)}
+      <a href="#/" className="back">← Все кампании</a>
+      <section className="card">
+        <div className="header">
+          <div>
+            <h1>{campaign.name}</h1>
+            <span className="muted">
+              Keitaro #{campaign.keitaro_id} · синхронизировано {formatDate(campaign.last_synced_at)}
+            </span>
+          </div>
+          <button className="primary" disabled={busy} onClick={fetchStreams}>
+            {busy ? 'Загружаю…' : 'Fetch Streams'}
+          </button>
+        </div>
+        {error && <p className="error">{error}</p>}
+        {warnings.map((w) => <p key={w} className="warning">{w}</p>)}
+      </section>
       {campaign.streams.map((s) => <StreamCard key={s.id} stream={s} onChange={replaceStream} />)}
     </>
   )
@@ -75,22 +89,34 @@ function StreamCard({ stream, onChange }: { stream: Stream; onChange: (s: Stream
     }
   }
 
-  const isOfferStream = stream.raw.schema === 'landings'
+  const raw = stream.raw as { schema?: string; action_payload?: string; filters?: { name: string; mode: string; payload: unknown }[] }
+  const isOfferStream = raw.schema === 'landings'
   const current = stream.offers.filter((o) => o.status !== 'removed')
   const archive = stream.offers.filter((o) => o.status === 'removed')
 
   return (
-    <section className={`stream ${stream.dirty ? 'dirty' : ''}`}>
-      <h2>
-        #{stream.position} {stream.name} <span className="muted">({String(stream.raw.schema)}, Keitaro ID {stream.keitaro_id})</span>
-      </h2>
-      {stream.dirty && <p>Есть неопубликованные изменения</p>}
+    <section className={`card stream ${stream.dirty ? 'dirty' : ''}`}>
+      <div className="stream-head">
+        <span className="pos">#{stream.position}</span>
+        <h2>{stream.name}</h2>
+        <span className="tag">{raw.schema}</span>
+        <span className="muted">Keitaro #{stream.keitaro_id}</span>
+        {stream.dirty && <span className="tag dirty">не опубликовано</span>}
+      </div>
 
       {!isOfferStream && (
-        <details>
-          <summary>Настройки потока из Keitaro (не редактируются)</summary>
-          <pre>{JSON.stringify({ action_type: stream.raw.action_type, action_payload: stream.raw.action_payload, filters: stream.raw.filters }, null, 2)}</pre>
-        </details>
+        <>
+          <div className="redirect">
+            {raw.filters?.map((f, i) => (
+              <span key={i}>Фильтр: <b>{f.name}</b> {f.mode === 'accept' ? '=' : '≠'} {JSON.stringify(f.payload)}</span>
+            ))}
+            {raw.action_payload && <span>Действие: → <a href={raw.action_payload}>{raw.action_payload}</a></span>}
+          </div>
+          <details>
+            <summary>JSON потока из Keitaro (не редактируется)</summary>
+            <pre>{JSON.stringify(stream.raw, null, 2)}</pre>
+          </details>
+        </>
       )}
 
       {isOfferStream && (
@@ -101,34 +127,35 @@ function StreamCard({ stream, onChange }: { stream: Stream; onChange: (s: Stream
             </thead>
             <tbody>
               {current.map((o) => <OfferRow key={o.id} offer={o} run={run} />)}
-              {current.length === 0 && <tr><td colSpan={5} className="muted">Нет офферов</td></tr>}
+              {current.length === 0 && <tr><td colSpan={5} className="muted">В потоке нет офферов</td></tr>}
             </tbody>
           </table>
 
-          <div className="row">
-            <input type="number" placeholder="ID оффера" value={offerId} onChange={(e) => setOfferId(e.target.value)} />
+          <div className="toolbar">
+            <input type="number" placeholder="ID оффера" value={offerId}
+              onChange={(e) => { setOfferId(e.target.value); setFound(null) }} onKeyDown={(e) => e.key === 'Enter' && offerId && search()} />
             <button disabled={!offerId} onClick={search}>Найти</button>
             {found && (
               <>
-                <span>{found.name}</span>
-                <button onClick={add}>Добавить</button>
+                <span className="found">{found.name}</span>
+                <button className="primary" onClick={add}>Добавить</button>
               </>
             )}
-          </div>
-
-          <div className="row">
-            <button disabled={!stream.dirty} onClick={() => run(`/streams/${stream.id}/push`)}>Push to Keitaro</button>
+            <span className="spacer" />
             <button disabled={!stream.dirty} onClick={() => run(`/streams/${stream.id}/cancel`)}>Cancel</button>
+            <button className="primary" disabled={!stream.dirty} onClick={() => run(`/streams/${stream.id}/push`)}>
+              Push to Keitaro
+            </button>
           </div>
 
           {archive.length > 0 && (
             <>
               <h3>Архив</h3>
-              <ul>
+              <ul className="archive">
                 {archive.map((o) => (
                   <li key={o.id}>
-                    {o.offer_name} <span className="muted">#{o.offer_keitaro_id}</span>{' '}
-                    <button onClick={() => run(`/stream-offers/${o.id}/restore`)}>Bring Back</button>
+                    <span>{o.offer_name} <span className="muted">#{o.offer_keitaro_id}</span></span>
+                    <button className="small" onClick={() => run(`/stream-offers/${o.id}/restore`)}>Bring Back</button>
                   </li>
                 ))}
               </ul>
@@ -141,43 +168,60 @@ function StreamCard({ stream, onChange }: { stream: Stream; onChange: (s: Stream
   )
 }
 
-const LABELS: Record<string, string> = { pending_add: 'новый', pending_remove: 'будет удалён' }
+const LABELS: Record<string, [string, string]> = {
+  pending_add: ['новый', 'new'],
+  pending_remove: ['будет удалён', 'removing'],
+}
 
 function OfferRow({ offer, run }: { offer: StreamOffer; run: (path: string, method?: string, body?: unknown) => Promise<boolean> }) {
   const [share, setShare] = useState(String(offer.share))
   useEffect(() => setShare(String(offer.share)), [offer.share])
 
   const removing = offer.status === 'pending_remove'
+  const label = LABELS[offer.status]
   const pin = (pinned: boolean, value = offer.share) => run(`/stream-offers/${offer.id}`, 'PATCH', { pinned, share: value })
+
+  async function savePinnedShare() {
+    if (share === String(offer.share)) return
+    // Пустое поле или отказ бэкенда — возвращаем в поле настоящий вес
+    if (share.trim() === '' || !(await pin(true, Number(share)))) setShare(String(offer.share))
+  }
 
   return (
     <tr className={removing ? 'removing' : ''}>
       <td>
-        {offer.offer_name} <span className="muted">#{offer.offer_keitaro_id}</span>
-        {LABELS[offer.status] && <span className="badge">{LABELS[offer.status]}</span>}
+        <span className="offer-name">{offer.offer_name}</span> <span className="muted">#{offer.offer_keitaro_id}</span>
+        {label && <> <span className={`tag ${label[1]}`}>{label[0]}</span></>}
       </td>
       <td>
-        {offer.pinned ? (
-          <input
-            type="number" min={0} max={100} className="share" value={share}
-            onChange={(e) => setShare(e.target.value)}
-            onBlur={() => share !== String(offer.share) && pin(true, Number(share))}
-            onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-          />
-        ) : (
-          offer.share
-        )}
-        %
+        <div className="weight">
+          <div className="bar"><div style={{ width: `${offer.share}%` }} /></div>
+          {offer.pinned ? (
+            <input
+              type="number" min={0} max={100} className="share" value={share}
+              onChange={(e) => setShare(e.target.value)}
+              onBlur={savePinnedShare}
+              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+            />
+          ) : (
+            <b>{offer.share}%</b>
+          )}
+        </div>
       </td>
-      <td className="muted">{offer.published_share === null ? '—' : `${offer.published_share}%`}</td>
+      <td className={offer.published_share !== offer.share ? 'changed' : 'muted'}>
+        {offer.published_share === null ? '—' : `${offer.published_share}%`}
+      </td>
       <td>
-        <input type="checkbox" disabled={removing} checked={offer.pinned} onChange={(e) => pin(e.target.checked)} />
+        <label className="pin">
+          <input type="checkbox" disabled={removing} checked={offer.pinned} onChange={(e) => pin(e.target.checked)} />
+          {offer.pinned && '📌'}
+        </label>
       </td>
       <td>
         {removing ? (
-          <button onClick={() => run(`/stream-offers/${offer.id}/restore`)}>Bring Back</button>
+          <button className="small" onClick={() => run(`/stream-offers/${offer.id}/restore`)}>Bring Back</button>
         ) : (
-          <button onClick={() => run(`/stream-offers/${offer.id}`, 'DELETE')}>Delete</button>
+          <button className="small danger" onClick={() => run(`/stream-offers/${offer.id}`, 'DELETE')}>Delete</button>
         )}
       </td>
     </tr>
