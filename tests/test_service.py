@@ -196,12 +196,25 @@ def test_pin_survives_push_and_delete_cancel(campaign):
     assert by_id(s, 3).pinned and not s.dirty
 
 
-def test_push_recalculates_broken_weights(campaign, fake):
+def test_push_refuses_broken_weights(campaign, fake):
     s = offers_stream(campaign)
     service.add_offer(s, 4)
     by_id(s, 4).share = 50  # как после гонки двух параллельных запросов
+    with pytest.raises(HTTPException):
+        service.push(s)
+    assert fake.pushed == []
+
+
+def test_pin_without_share_change_is_a_draft(campaign, fake):
+    s = offers_stream(campaign)
+    service.set_pin(by_id(s, 3), True, None)  # закрепили на текущих 33%
+    assert s.dirty
     service.push(s)
-    assert sum(o["share"] for o in fake.pushed[-1]) == 100
+    assert not s.dirty
+    service.add_offer(s, 4)
+    service.cancel(s)
+    assert by_id(s, 3).pinned
+    assert state(s) == {1: (ACTIVE, 34), 2: (ACTIVE, 33), 3: (ACTIVE, 33)}
 
 
 def test_cancel_and_delete_return_brought_back_offer_to_archive(campaign):

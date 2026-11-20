@@ -48,6 +48,7 @@ class Stream(Base):
     def dirty(self) -> bool:
         """Есть неопубликованные изменения (поток подсвечивается жёлтым)."""
         return any(o.status in (PENDING_ADD, PENDING_REMOVE) or o.share != o.published_share
+                   or o.pinned != o.published_pinned
                    for o in self.offers if o.status != REMOVED)
 
 

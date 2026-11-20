@@ -165,8 +165,10 @@ def push(stream: Stream) -> None:
     if theirs != published:
         raise HTTPException(409, "Поток изменили в Keitaro после последнего Fetch. "
                                  "Нажмите Cancel, затем Fetch Streams и повторите изменения.")
-    _recalc(stream)  # страховка: веса могли разъехаться при параллельных запросах
     live = [o for o in stream.offers if o.status in LIVE]
+    if live and sum(o.share for o in live) != 100:
+        # Бывает только после параллельных запросов; не отправляем веса, которых пользователь не видел
+        raise HTTPException(400, "Сумма весов не равна 100%. Нажмите Cancel или измените поток, чтобы веса пересчитались.")
     # Сохраняем state офферов в Keitaro (например, disabled), чтобы Push его не сбросил
     states = {o["offer_id"]: o["state"] for o in current["offers"]}
     updated = keitaro.update_stream_offers(stream.keitaro_id, [
